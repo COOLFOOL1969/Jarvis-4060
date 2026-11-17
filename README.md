@@ -23,6 +23,7 @@ Diese Version ist auf eine **NVIDIA-Grafikkarte mit 8 GB** ausgelegt (z. B. RTX 
 | Morgenbriefing | „Guten Morgen Jarvis“, „Was liegt heute an?“ |
 | Gedächtnis | „Merk dir, dass ich Kaffee schwarz trinke“ |
 | Lautstärke | „Lautstärke 30 Prozent“ |
+| Webseiten aus Speed Dial (optional) | „Öffne Mindfactory“, „Öffne Gruppe Hardware“ |
 
 Eine Haussteuerung (Smart Home) ist in dieser Version **nicht** enthalten.
 
@@ -49,6 +50,7 @@ Eine Haussteuerung (Smart Home) ist in dieser Version **nicht** enthalten.
 | [Voicemeeter](https://vb-audio.com/Voicemeeter/) | Genauere Lautstärkeregelung | nein |
 | Google-Kalender | Termine vorlesen | nein |
 | Synology-NAS mit Synology Chat | Befehle vom Handy schicken | nein |
+| [NAS Speed Dial](https://github.com/COOLFOOL1969/nas-speed-dial) (Chrome-Erweiterung) + Synology-NAS mit WebDAV | Gespeicherte Webseiten per Sprache öffnen | nein |
 
 ### KI-Modelle (werden mit `Modelle_laden.bat` geladen)
 
@@ -174,6 +176,28 @@ Im neuen Jahr legst du die neue Datei einfach dazu.
 Hast du [Voicemeeter](https://vb-audio.com/Voicemeeter/), stellt JARVIS die Lautstärke dort ein.
 In `config.py`: `VOICEMEETER_KIND` (`"basic"`, `"banana"` oder `"potato"`) und `VOICEMEETER_BUS`.
 Ohne Voicemeeter nutzt JARVIS die normale Windows-Lautstärke.
+
+### Speed Dial (Webseiten per Sprache öffnen)
+JARVIS kann Seiten aus der Chrome-Erweiterung **NAS Speed Dial** öffnen:
+<https://github.com/COOLFOOL1969/nas-speed-dial>
+
+Dafür brauchst du ein **Synology-NAS mit dem Paket „WebDAV Server“**.
+1. Die Erweiterung so einrichten, wie es in ihrem Repository beschrieben ist.
+2. In `config.py` dieselben Angaben eintragen wie in der Erweiterung:
+
+```python
+SPEEDDIAL_AKTIV = True
+SPEEDDIAL_NAS_URL = "http://192.168.X.X:5005"   # WebDAV-Adresse deines NAS
+SPEEDDIAL_NAS_ORDNER = "/SpeedDial"             # Ordner auf dem NAS
+SPEEDDIAL_NAS_USER = "speeddial"                # NAS-Benutzer
+SPEEDDIAL_NAS_PASS = "..."                      # Passwort dieses Benutzers
+SPEEDDIAL_ERWEITERUNG_ID = ""                   # nur für „Öffne Gruppe …“: ID aus chrome://extensions
+```
+
+Danach JARVIS neu starten. Beispiele: „Öffne Mindfactory“, „Öffne Mindfactory bei Hardware“,
+„Öffne Gruppe Hardware“, „Öffne alle Seiten von Hardware“.
+
+> Den WebDAV-Port nie im Router freigeben. Für unterwegs ein VPN benutzen.
 
 ### Synology Chat (Befehle vom Handy)
 Beschreibung oben in der Datei `synology_bot.py`. Einschalten mit `SYNOLOGY_BOT_AKTIV = True` in `config.py`.
