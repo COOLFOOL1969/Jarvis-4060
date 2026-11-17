@@ -1,0 +1,1 @@
+Die Anleitung steht in README.md (auf GitHub wird sie automatisch auf der Startseite angezeigt).

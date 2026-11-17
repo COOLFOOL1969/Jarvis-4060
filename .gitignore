@@ -1,0 +1,35 @@
+# ===== Jarvis: was NICHT ins Repository gehört =====
+
+# Geheimes und Persönliches (enthält z.B. die geheime Kalender-Adresse und Passwörter)
+config.py
+
+# Müllabfuhr-Dateien und Zwischenspeicher, die Jarvis selbst erzeugt
+muell/
+*.ics
+gespraech_verlauf.json
+jahrestage_status.json
+jarvis_erinnerungen.json
+jarvis_zuletzt.json
+obsidian_index.json
+verknuepfung_abgelehnt.json
+wetter_cache.json
+hud_data.js
+hud_data.json
+kalender_cache_*.ics
+jarvis_voice_*.mp3
+*.mp3
+*.jsonl
+
+# Temporäres
+__pycache__/
+*.pyc
+*.tmp
+*.log
+.venv/
+venv/
+
+# Windows / Editor
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

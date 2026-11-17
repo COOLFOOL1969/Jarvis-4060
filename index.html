@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>JARVIS HUD</title>
+    <style>
+        :root {
+            --neon-cyan: #00f3ff;
+            --neon-blue: #0066ff;
+            --dark-bg: #030914;
+            --neon-red: #ff003c;
+            --neon-red-dark: #990024;
+            --amber: #ffbc00;
+            --green: #00ffaa;
+
+            /* Dynamische Variablen für JavaScript-Wechsel */
+            --active-core: var(--neon-cyan);
+            --active-inner: var(--neon-blue);
+            --active-glow: rgba(0, 243, 255, 0.35);
+        }
+        * { box-sizing: border-box; }
+        body {
+            background: #030914;
+            color: #00f3ff;
+            font-family: monospace;
+            margin: 0;
+            padding: 14px 20px 20px 20px;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            background-image: radial-gradient(circle at 50% 50%, rgba(0, 102, 255, 0.08) 0%, transparent 80%), linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.3) 50%);
+            background-size: 100% 100%, 100% 4px;
+        }
+
+        /* ---------- Kopfzeile: Uhr, Datum, Wetter ---------- */
+        .topbar { display: flex; align-items: center; gap: 28px; flex-wrap: wrap; padding: 8px 16px; border: 1px solid #0066ff; border-radius: 4px; background: rgba(3, 15, 30, 0.8); box-shadow: 0 0 15px rgba(0, 243, 255, 0.15); }
+        .clock { font-size: 40px; font-weight: bold; letter-spacing: 3px; text-shadow: 0 0 12px rgba(0, 243, 255, 0.6); line-height: 1; }
+        .clock small { font-size: 18px; opacity: 0.6; letter-spacing: 1px; margin-left: 4px; }
+        .datebox { font-size: 15px; line-height: 1.35; }
+        .datebox .tag { font-size: 18px; font-weight: bold; }
+        .datebox .sub { opacity: 0.65; }
+        .wetter { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+        .wetter .sym { font-size: 34px; line-height: 1; }
+        .wetter .temp { font-size: 28px; font-weight: bold; }
+        .wetter .desc { font-size: 13px; line-height: 1.35; opacity: 0.85; }
+        .tage { display: flex; gap: 8px; }
+        .tag-chip { border: 1px solid rgba(0, 102, 255, 0.7); border-radius: 3px; padding: 3px 8px; font-size: 12px; text-align: center; min-width: 74px; }
+        .tag-chip b { display: block; font-size: 11px; opacity: 0.7; font-weight: normal; }
+        .spacer { flex: 1; }
+        a.badge { color: var(--neon-cyan); text-decoration: none; } a.badge:hover { background: #0066ff; color: #fff; }
+        .badge b { color: #fff; margin-left: 4px; }
+        .badge { font-size: 12px; border: 1px solid rgba(0, 243, 255, 0.4); border-radius: 3px; padding: 3px 8px; opacity: 0.8; }
+
+        .hud-container { display: grid; grid-template-columns: 1fr 1fr; grid-gap: 20px; flex: 1; min-height: 0; }
+        .panel { background: rgba(3, 15, 30, 0.8); border: 1px solid #0066ff; padding: 16px 20px; border-radius: 4px; box-shadow: 0 0 15px rgba(0, 243, 255, 0.2); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+        h2 { border-bottom: 1px solid #00f3ff; padding-bottom: 5px; font-size: 14px; text-transform: uppercase; margin-top: 0; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+        h2 .tabs { margin-left: auto; display: flex; gap: 6px; }
+        .tab { padding: 3px 12px; font-size: 12px; background: transparent; border: 1px solid #0066ff; color: #00f3ff; cursor: pointer; }
+        .tab.active { background: #0066ff; color: #fff; }
+
+        #tree-display { overflow-y: auto; flex: 1; min-height: 0; line-height: 1.5; }
+        #graph-wrap { position: relative; flex: 1; min-height: 0; display: none; border: 1px solid rgba(0, 102, 255, 0.5); background: #000; }
+        #graph-canvas { width: 100%; height: 100%; display: block; cursor: grab; }
+        #vk-panel { flex: 1; min-height: 0; overflow-y: auto; display: none; }
+        .vk-item { border: 1px solid rgba(0,102,255,0.5); background: rgba(0,20,40,0.6); padding: 8px 10px; margin-bottom: 8px; border-radius: 3px; }
+        .vk-titel { font-size: 13px; line-height: 1.4; } .vk-titel b { color: #ff2bd6; }
+        .vk-wert { font-size: 11px; opacity: .7; margin: 3px 0 6px; }
+        .vk-item button { margin-right: 6px; padding: 2px 10px; font-size: 12px; background: transparent; border: 1px solid #00f3ff; color: #00f3ff; cursor: pointer; }
+        .vk-item button.nein { border-color: #ff5577; color: #ff5577; }
+        .vk-item button:disabled { opacity: .4; cursor: default; }
+        #vk-hinweis { font-size: 12px; opacity: .8; margin-bottom: 8px; }
+        #graph-info { position: absolute; left: 8px; bottom: 6px; font-size: 11px; opacity: 0.7; pointer-events: none; }
+        #graph-legend { position: absolute; right: 8px; top: 6px; font-size: 11px; opacity: 0.75; pointer-events: none; text-align: right; }
+
+        /* Dynamisch anpassbarer Core-Reactor */
+        /* JARVIS-Ring (Canvas, siehe JarvisRing weiter unten) */
+        .core-reactor { flex: 1 1 0; min-height: 60px; max-height: 560px; aspect-ratio: 1 / 1; max-width: 100%; margin: 0 auto 6px auto; }
+        #ring-canvas { width: 100%; height: 100%; display: block; }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+        #status-display { font-size: 22px; font-weight: bold; margin-bottom: 8px; text-align: center; }
+        .kern-wrap { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+
+        /* ---------- Timer / Wecker / Erinnerungen ---------- */
+        #zeit-strip { display: none; margin-bottom: 8px; border: 1px solid rgba(255, 188, 0, 0.6); padding: 6px 10px; max-height: 150px; overflow-y: auto; }
+        #zeit-strip.zeigen { display: block; }
+        .z-item { display: flex; align-items: center; gap: 10px; padding: 3px 0; font-size: 14px; }
+        .z-item .ico { width: 20px; text-align: center; }
+        .z-item .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .z-item .rest { color: var(--amber); font-weight: bold; min-width: 76px; text-align: right; }
+        .z-item.klingelt { color: #fff; background: rgba(255, 0, 60, 0.35); animation: blink 0.9s infinite; padding: 4px 6px; }
+        .z-item .x { padding: 0 8px; background: transparent; color: #00f3ff; border: 1px solid #0066ff; }
+        .z-item .x:hover { background: #ff003c; color: #fff; }
+        #zeit-ok { display: none; margin: 0 0 6px 0; width: 100%; background: #ff003c; font-weight: bold; }
+        #zeit-ok.zeigen { display: block; }
+
+        #termine-strip { display: none; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 6px 16px; font-size: 14px; border: 1px solid #0066ff; border-radius: 4px; background: rgba(3, 15, 30, 0.8); box-shadow: 0 0 15px rgba(0, 243, 255, 0.15); }
+        #termine-strip::before { content: "TERMINE"; font-size: 12px; letter-spacing: 2px; opacity: .55; margin-right: 6px; }
+        #termine-strip .trm { border: 1px solid rgba(0,243,255,.35); border-radius: 3px; padding: 2px 10px; opacity: .9; }
+        #termine-strip .trm.nah { border-color: var(--neon-amber, #ffbc00); color: #ffbc00; opacity: 1; }
+        #cmd-terminal-box {
+            background: #000; border: 1px solid #0066ff; color: #00f3ff;
+            padding: 10px; flex: 0 0 32vh; min-height: 110px; overflow-y: auto;
+            font-size: 15px;
+            line-height: 1.5;
+            white-space: pre-wrap; margin-top: 10px;
+            box-shadow: inset 0 0 10px rgba(0, 102, 255, 0.3);
+        }
+
+        .input-line { display: flex; gap: 10px; flex-wrap: wrap; }
+        input { flex: 1; min-width: 160px; background: #000; border: 1px solid #0066ff; color: #00f3ff; padding: 10px; font-family: inherit; outline: none; }
+        button { background: #0066ff; border: none; color: #fff; padding: 10px 16px; cursor: pointer; font-family: inherit; }
+        button:hover { background: #00f3ff; color: #000; }
+        .shutdown-btn { background: #ff003c !important; }
+        .shutdown-btn:hover { background: #ff0000 !important; color: #fff !important; }
+        .mic-btn.muted { background: #ff003c; }
+        .mic-btn.muted:hover { background: #ff0000; color: #fff; }
+        .folder-item { color: #ffbc00; font-weight: bold; cursor: pointer; user-select: none; }
+        .folder-item:hover { text-shadow: 0 0 8px rgba(255, 188, 0, 0.8); }
+        .tree-cnt { opacity: 0.55; font-weight: normal; font-size: 12px; }
+        .tree-kids { margin-left: 18px; border-left: 1px solid rgba(0, 102, 255, 0.35); padding-left: 8px; }
+        .tree-file { cursor: pointer; padding: 1px 0; }
+        .tree-file:hover { text-shadow: 0 0 8px rgba(0, 255, 170, 0.8); }
+        .file-item { color: #00ffaa; }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <div class="clock" id="clock">--:--<small id="clock-sec">:--</small></div>
+        <div class="datebox"><div class="tag" id="date-tag">-</div><div class="sub" id="date-sub">-</div></div>
+        <div class="wetter" id="wetter"><span class="desc">Wetter wird geladen ...</span></div>
+        <div class="spacer"></div>
+        <div class="badge" id="stt-badge" title="Spracherkennung">🎙 -</div>
+    </div>
+
+    <div id="termine-strip"></div>
+
+    <div class="hud-container">
+        <div class="panel">
+            <h2>Archiv Matrix
+                <span class="tabs">
+                    <button class="tab" id="tree-open" style="display:none" title="Alle Ordner aufklappen" onclick="treeAll(true)">⊞</button>
+                    <button class="tab" id="tree-close" style="display:none" title="Alle Ordner zuklappen" onclick="treeAll(false)">⊟</button>
+                    <button class="tab active" id="tab-graph" onclick="showTab('graph')">GRAPH</button>
+                    <button class="tab" id="tab-baum" onclick="showTab('baum')">BAUM</button>
+                    <button class="tab" id="tab-links" title="Fehlende Verknüpfungen zwischen Notizen" onclick="showTab('links')">LINKS</button>
+                </span>
+            </h2>
+            <div id="tree-display" style="display:none">Lade Dateisystem...</div>
+            <div id="vk-panel"><div id="vk-hinweis"></div><div id="vk-liste"></div></div>
+            <div id="graph-wrap">
+                <canvas id="graph-canvas"></canvas>
+                <div id="graph-legend"></div>
+                <div id="graph-info">Klick: Notiz öffnen · Ziehen: Knoten bewegen · Mausrad: Zoom</div>
+            </div>
+        </div>
+        <div class="panel">
+            <h2>JARVIS Zentral-Kern</h2>
+            <div class="kern-wrap">
+                <div id="core" class="core-reactor"><canvas id="ring-canvas"></canvas></div>
+                <div id="status-display">STANDBY</div>
+            </div>
+
+            <button id="zeit-ok" onclick="zeitAck()">✔ OK – Alarm beenden</button>
+            <div id="zeit-strip"></div>
+
+            <div class="input-line">
+                <input type="text" id="cmd-input" placeholder="BEFEHL EINGEBEN..." autocomplete="off">
+                <button id="mic-btn" class="mic-btn" onclick="toggleMic()">🎤 MIKRO AN</button>
+                <button class="shutdown-btn" onclick="triggerShutdown()">POWER OFF</button>
+            </div>
+            <div id="cmd-terminal-box">Koppele Live-Konsole...</div>
+        </div>
+    </div>
+    <script>
+// Jeder Jarvis-Tab hat einen festen Namen. Ein Klick springt in den vorhandenen Tab, statt einen neuen zu öffnen.
+window.name = 'jarvis_hud';
+function zuTab(e, url, name) {
+    e.preventDefault();
+    const w = window.open('', name);
+    if (!w) { location.href = url; return; }
+    try { if (w.location.href === 'about:blank') w.location.href = url; } catch (_) { w.location.href = url; }
+    w.focus();
+}
+        /* ======================= JARVIS-Ring ======================= */
+/* JARVIS-Ring: drei eigene Entwürfe auf einer Canvas.
+   Benutzung:  const ring = JarvisRing.erzeuge(canvasElement, { variante: 'A' | 'B' | 'C', mitte: 'zeit' | 'leer' });
+               ring.setZustand('PROCESSING');   // ONLINE, STANDBY, PROCESSING, AUDIO-AUSGABE, SCANNING, SEARCHING, OFFLINE
+               ring.setStumm(true);             // Mikrofon aus
+               ring.setAlarm(true);             // Timer klingelt */
+const JarvisRing = (() => {
+    const ZUSTAENDE = {
+        'ONLINE':        { farbe: [0, 243, 255],  tempo: 1.0, pegel: 0.10, modus: 'ruhe' },
+        'STANDBY':       { farbe: [0, 243, 255],  tempo: 0.8, pegel: 0.08, modus: 'ruhe' },
+        'PROCESSING':    { farbe: [255, 188, 0],  tempo: 3.0, pegel: 0.40, modus: 'denken' },
+        'AUDIO-AUSGABE': { farbe: [255, 0, 60],   tempo: 1.6, pegel: 0.90, modus: 'sprechen' },
+        'SCANNING':      { farbe: [0, 255, 170],  tempo: 2.0, pegel: 0.40, modus: 'suchen' },
+        'SEARCHING':     { farbe: [0, 255, 170],  tempo: 2.0, pegel: 0.40, modus: 'suchen' },
+        'ERKENNUNG':     { farbe: [180, 110, 255], tempo: 1.8, pegel: 0.30, modus: 'hoeren' },
+        'OFFLINE':       { farbe: [80, 100, 130], tempo: 0.2, pegel: 0.00, modus: 'ruhe' },
+    };
+    const STUMM = { farbe: [110, 130, 165], tempo: 0.5, pegel: 0.03, modus: 'ruhe' };
+    const ALARM = { farbe: [255, 120, 0], tempo: 2.2, pegel: 0.75, modus: 'sprechen' };
+    const TAU = Math.PI * 2;
+    const rgba = (c, a) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+    const lerp = (a, b, k) => a + (b - a) * k;
+    const mod = (a, n) => ((a % n) + n) % n;
+    const winkelDiff = (a, b) => { let d = Math.abs(mod(a - b, TAU)); return d > Math.PI ? TAU - d : d; };
+
+    // pseudo-zufällige, aber stabile Zahl aus einer Ganzzahl
+    const zufall = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+
+    function erzeuge(canvas, opt = {}) {
+        const ctx = canvas.getContext('2d');
+        const variante = opt.variante || 'A';
+        const mitte = opt.mitte || 'zeit';
+        const st = { farbe: [0, 243, 255], tempo: 1, pegel: 0.1, ziel: ZUSTAENDE.ONLINE, name: 'ONLINE', stumm: false, alarm: false,
+                     pegelWeich: 0.1, phase: 0, t0: performance.now(), laeuft: true, blips: [], letzteBlip: 0 };
+        let W = 300, H = 300, dpr = 1, raf = 0;
+
+        function groesse() {
+            dpr = Math.min(2, window.devicePixelRatio || 1);
+            const r = canvas.getBoundingClientRect();
+            W = Math.max(80, r.width); H = Math.max(80, r.height);
+            canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+        }
+        groesse();
+        const ro = (typeof ResizeObserver !== 'undefined') ? new ResizeObserver(groesse) : null;
+        if (ro) ro.observe(canvas);
+
+        const aktuellesZiel = () => st.alarm ? ALARM : (st.stumm ? STUMM : st.ziel);
+
+        // ---------- gemeinsame Zeichenhilfen ----------
+        function glimmen(c, breite, alpha, zeichne) {                       // Leuchteffekt ohne teures shadowBlur
+            ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+            ctx.strokeStyle = rgba(c, alpha * 0.18); ctx.lineWidth = breite * 4.5; zeichne();
+            ctx.strokeStyle = rgba(c, alpha * 0.40); ctx.lineWidth = breite * 2.2; zeichne();
+            ctx.strokeStyle = rgba(c, alpha);        ctx.lineWidth = breite;       zeichne();
+            ctx.restore();
+        }
+        function kugel(x, y, r, c, a) {                                       // weicher Lichtpunkt
+            const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+            g.addColorStop(0, rgba(c, a)); g.addColorStop(0.35, rgba(c, a * 0.45)); g.addColorStop(1, rgba(c, 0));
+            ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+        }
+        function mitteText(R, c, t, y0 = 0, groesse = 0.17) {
+            if (mitte !== 'zeit') return;
+            const d = new Date(); const s = String(d.getHours()).padStart(2, '0') + (Math.floor(t) % 2 ? ' ' : ':') + String(d.getMinutes()).padStart(2, '0');
+            ctx.save(); ctx.translate(0, y0); ctx.font = `bold ${Math.round(R * groesse)}px monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = rgba(c, 0.25); ctx.fillText(s, 0, 1); ctx.fillText(s, 0, -1);
+            ctx.fillStyle = rgba(c, 0.95); ctx.fillText(s, 0, 0); ctx.restore();
+        }
+        // Sprachhüllkurve: wirkt wie Silben, ohne echtes Audio
+        const huelle = (t) => Math.min(1, 0.35 + 0.65 * Math.abs(Math.sin(t * 6.1) * Math.sin(t * 2.3 + 1.2) + 0.5 * Math.sin(t * 11.7)));
+
+        // ---------- Entwurf A: Spektrum-Ring ----------
+        function zeichneA(R, c, t, pegel, modus) {
+            const N = 72, rb = R * 0.50, lmax = R * 0.30;
+            // äußerer Ring mit Lücken, dreht langsam
+            const a0 = t * 0.18 * st.tempo;
+            glimmen(c, R * 0.012, 0.9, () => { for (let k = 0; k < 4; k++) { ctx.beginPath(); ctx.arc(0, 0, R * 0.96, a0 + k * TAU / 4 + 0.12, a0 + (k + 1) * TAU / 4 - 0.12); ctx.stroke(); } });
+            // Skala
+            ctx.save(); ctx.rotate(-t * 0.05 * st.tempo); ctx.strokeStyle = rgba(c, 0.5); ctx.lineWidth = R * 0.006;
+            for (let i = 0; i < 120; i++) { const a = i * TAU / 120, l = i % 10 === 0 ? 0.045 : 0.02; ctx.beginPath(); ctx.moveTo(Math.cos(a) * R * 0.88, Math.sin(a) * R * 0.88); ctx.lineTo(Math.cos(a) * R * (0.88 - l), Math.sin(a) * R * (0.88 - l)); ctx.stroke(); }
+            ctx.restore();
+            // Balken
+            const kopf = t * st.tempo * 1.3, ping = (t * 0.55) % 1;
+            for (let i = 0; i < N; i++) {
+                const a = i * TAU / N - Math.PI / 2;
+                let amp = 0.10 + 0.07 * Math.sin(t * 1.4 + i * 0.35) + 0.04 * Math.sin(t * 0.7 - i * 0.12);    // ruhiges Atmen
+                if (modus === 'sprechen') amp += pegel * huelle(t) * (0.45 + 0.55 * Math.abs(Math.sin(i * 0.45 + t * 6) * Math.sin(i * 0.17 - t * 2.3)));
+                if (modus === 'denken') amp += Math.max(0, 1 - winkelDiff(a, kopf) / 1.1) * 0.9;
+                if (modus === 'hoeren') amp += 0.35 * Math.abs(Math.sin(i * 0.5 + t * 7) * Math.sin(i * 0.23 - t * 3.1));
+                if (modus === 'suchen') amp += Math.max(0, 1 - Math.abs(mod(i / N - ping, 1) - 0) * 7) * 0.6 + 0.2 * Math.abs(Math.sin(i * 0.6 - t * 4));
+                amp = Math.min(1, amp);
+                const x1 = Math.cos(a) * rb, y1 = Math.sin(a) * rb, x2 = Math.cos(a) * (rb + lmax * amp + R * 0.02), y2 = Math.sin(a) * (rb + lmax * amp + R * 0.02);
+                ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+                ctx.strokeStyle = rgba(c, 0.18 + 0.32 * amp); ctx.lineWidth = R * 0.05; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+                ctx.strokeStyle = rgba(c, 0.45 + 0.55 * amp); ctx.lineWidth = R * 0.022; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+                ctx.restore();
+            }
+            // innerer Kern
+            const atem = 0.5 + 0.5 * Math.sin(t * 1.6);
+            ctx.save(); ctx.globalCompositeOperation = 'lighter';
+            kugel(0, 0, R * (0.40 + 0.06 * pegel * huelle(t) + 0.02 * atem), c, 0.16 + 0.26 * pegel);
+            ctx.restore();
+            glimmen(c, R * 0.008, 0.7, () => { ctx.beginPath(); ctx.arc(0, 0, R * 0.44, 0, TAU); ctx.stroke(); });
+            mitteText(R, c, t);
+        }
+
+        // ---------- Entwurf B: Orbit & Partikel ----------
+        const ORBITEN = [ { rx: 0.88, ry: 0.34, neigung: 0.0, tempo: 0.55, n: 3 }, { rx: 0.80, ry: 0.30, neigung: 1.05, tempo: -0.70, n: 2 }, { rx: 0.72, ry: 0.26, neigung: 2.10, tempo: 0.85, n: 3 } ];
+        function zeichneB(R, c, t, pegel, modus) {
+            // Partikelstaub
+            ctx.save(); ctx.globalCompositeOperation = 'lighter';
+            for (let i = 0; i < 110; i++) {
+                const r = R * (0.30 + 0.68 * zufall(i)), a = zufall(i + 99) * TAU + t * (0.02 + 0.06 * zufall(i + 7)) * st.tempo * (i % 2 ? 1 : -1);
+                const tw = 0.25 + 0.75 * Math.abs(Math.sin(t * (0.6 + zufall(i + 3) * 1.6) + i));
+                ctx.fillStyle = rgba(c, 0.10 + 0.55 * tw * (0.4 + pegel)); ctx.beginPath(); ctx.arc(Math.cos(a) * r, Math.sin(a) * r, R * (0.004 + 0.007 * zufall(i + 5)), 0, TAU); ctx.fill();
+            }
+            ctx.restore();
+            // Bahnen mit wandernden Lichtpunkten und Schweif
+            ORBITEN.forEach((o, k) => {
+                const praez = t * 0.05 * st.tempo, puls = 1 + (modus === 'sprechen' ? 0.07 * pegel * huelle(t + k) * Math.sin(t * 9 + k) : 0.012 * Math.sin(t + k));
+                const rx = R * o.rx * puls, ry = R * o.ry * puls, neigung = o.neigung + praez * (k % 2 ? -1 : 1);
+                ctx.save(); ctx.rotate(neigung);
+                glimmen(c, R * 0.007, 0.5, () => { ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, TAU); ctx.stroke(); });
+                for (let d = 0; d < o.n; d++) {
+                    const a = t * o.tempo * st.tempo * 0.9 + d * TAU / o.n;
+                    for (let s = 14; s >= 0; s--) {                                      // Schweif
+                        const aa = a - s * 0.07 * Math.sign(o.tempo), x = Math.cos(aa) * rx, y = Math.sin(aa) * ry, f = 1 - s / 15;
+                        ctx.save(); ctx.globalCompositeOperation = 'lighter'; kugel(x, y, R * (0.012 + 0.03 * f * f), c, 0.15 + 0.85 * f * f); ctx.restore();
+                    }
+                }
+                ctx.restore();
+            });
+            // Kern-Plasma
+            const atem = 1 + 0.07 * Math.sin(t * 1.7), kr = R * 0.22 * atem * (1 + (modus === 'sprechen' ? 0.30 * pegel * huelle(t) : 0));
+            ctx.save(); ctx.globalCompositeOperation = 'lighter';
+            kugel(0, 0, kr * 2.1, c, 0.20 + 0.20 * pegel); kugel(0, 0, kr * 1.1, c, 0.55 + 0.25 * pegel); kugel(0, 0, kr * 0.45, [255, 255, 255], 0.55);
+            for (let i = 0; i < 3; i++) { const a = t * (0.9 + i * 0.4) * st.tempo + i * 2.1; kugel(Math.cos(a) * kr * 0.55, Math.sin(a * 1.2) * kr * 0.55, kr * 0.5, c, 0.35); }
+            if (modus === 'hoeren') {                                                // Wellen laufen von außen zum Kern (Ton wird aufgenommen)
+                for (let k = 0; k < 3; k++) {
+                    const p = (t * 0.9 + k / 3) % 1;
+                    ctx.strokeStyle = rgba(c, 0.65 * Math.sin(p * Math.PI)); ctx.lineWidth = R * 0.012;
+                    ctx.beginPath(); ctx.arc(0, 0, R * (0.85 - 0.6 * p), 0, TAU); ctx.stroke();
+                }
+            }
+            if (modus === 'suchen' || modus === 'denken') {                          // Wellen vom Kern
+                const p = (t * (modus === 'denken' ? 1.2 : 0.7)) % 1;
+                ctx.strokeStyle = rgba(c, 0.6 * (1 - p)); ctx.lineWidth = R * 0.01; ctx.beginPath(); ctx.arc(0, 0, R * (0.25 + 0.6 * p), 0, TAU); ctx.stroke();
+            }
+            ctx.restore();
+            mitteText(R, c, t, R * 0.52, 0.12);
+        }
+
+        // ---------- Entwurf C: Radar / Sechseck ----------
+        function sechseck(r, rot) { ctx.beginPath(); for (let i = 0; i <= 6; i++) { const a = rot + i * TAU / 6; i ? ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r) : ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r); } ctx.closePath(); }
+        function zeichneC(R, c, t, pegel, modus) {
+            const sweepA = t * 0.9 * st.tempo;
+            // Rahmen
+            glimmen(c, R * 0.010, 0.85, () => { sechseck(R * 0.96, -t * 0.07 * st.tempo - Math.PI / 6); ctx.stroke(); });
+            for (let i = 0; i < 6; i++) { const a = -t * 0.07 * st.tempo - Math.PI / 6 + i * TAU / 6; ctx.save(); ctx.globalCompositeOperation = 'lighter'; kugel(Math.cos(a) * R * 0.96, Math.sin(a) * R * 0.96, R * 0.035, c, 0.9); ctx.restore(); }
+            glimmen(c, R * 0.006, 0.45, () => { sechseck(R * 0.66, t * 0.11 * st.tempo); ctx.stroke(); });
+            // Ringe
+            ctx.save(); ctx.strokeStyle = rgba(c, 0.38); ctx.lineWidth = R * 0.006; ctx.setLineDash([R * 0.01, R * 0.035]);
+            ctx.beginPath(); ctx.arc(0, 0, R * 0.80, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+            ctx.beginPath(); ctx.arc(0, 0, R * 0.52, 0, TAU); ctx.stroke(); ctx.beginPath(); ctx.arc(0, 0, R * 0.30, 0, TAU); ctx.stroke();
+            ctx.strokeStyle = rgba(c, 0.18); for (let i = 0; i < 12; i++) { const a = i * TAU / 12; ctx.beginPath(); ctx.moveTo(Math.cos(a) * R * 0.30, Math.sin(a) * R * 0.30); ctx.lineTo(Math.cos(a) * R * 0.80, Math.sin(a) * R * 0.80); ctx.stroke(); }
+            ctx.restore();
+            // Suchstrahl (konischer Verlauf)
+            if (ctx.createConicGradient) {
+                ctx.save(); const g = ctx.createConicGradient(sweepA - 1.3, 0, 0);
+                g.addColorStop(0, rgba(c, 0)); g.addColorStop(1.3 / TAU, rgba(c, 0.38 + 0.25 * pegel)); g.addColorStop(1.3 / TAU + 0.004, rgba(c, 0)); g.addColorStop(1, rgba(c, 0));
+                ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R * 0.80, 0, TAU); ctx.fill(); ctx.restore();
+            }
+            glimmen(c, R * 0.008, 0.9, () => { ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(sweepA) * R * 0.80, Math.sin(sweepA) * R * 0.80); ctx.stroke(); });
+            // Ziele: tauchen auf, wenn der Strahl vorbeikommt oder Jarvis aktiv ist
+            const rate = modus === 'ruhe' ? 0.35 : modus === 'sprechen' ? 2.8 : 1.8;
+            if (t - st.letzteBlip > 1 / rate) { st.letzteBlip = t; st.blips.push({ a: Math.random() * TAU, r: R * (0.32 + 0.46 * Math.random()), t0: t }); if (st.blips.length > 40) st.blips.shift(); }
+            ctx.save(); ctx.globalCompositeOperation = 'lighter';
+            st.blips.forEach((b) => { const alt = t - b.t0; if (alt > 3) return; const f = 1 - alt / 3; kugel(Math.cos(b.a) * b.r, Math.sin(b.a) * b.r, R * (0.02 + 0.035 * (1 - f)), c, 0.9 * f); });
+            ctx.restore();
+            // Kern
+            ctx.save(); ctx.globalCompositeOperation = 'lighter'; kugel(0, 0, R * (0.30 + 0.05 * pegel * huelle(t)), c, 0.12 + 0.22 * pegel); ctx.restore();
+            mitteText(R, c, t);
+        }
+
+        const ZEICHNER = { A: zeichneA, B: zeichneB, C: zeichneC };
+
+        function bild(jetzt) {
+            if (!st.laeuft) return;
+            raf = requestAnimationFrame(bild);
+            const dt = Math.min(0.1, (jetzt - (st.letzter || jetzt)) / 1000); st.letzter = jetzt;
+            const t = (jetzt - st.t0) / 1000, z = aktuellesZiel(), k = 1 - Math.exp(-dt * 4);
+            for (let i = 0; i < 3; i++) st.farbe[i] = lerp(st.farbe[i], z.farbe[i], k);
+            st.tempo = lerp(st.tempo, z.tempo, k); st.pegel = lerp(st.pegel, z.pegel, k);
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+            ctx.translate(W / 2, H / 2);
+            (ZEICHNER[variante] || zeichneA)(Math.min(W, H) / 2 - 2, st.farbe, t, st.pegel, z.modus);
+        }
+        raf = requestAnimationFrame(bild);
+
+        return {
+            setZustand(name) { st.name = name; st.ziel = ZUSTAENDE[name] || ZUSTAENDE.ONLINE; },
+            setStumm(v) { st.stumm = !!v; },
+            setAlarm(v) { st.alarm = !!v; },
+            stop() { st.laeuft = false; cancelAnimationFrame(raf); if (ro) ro.disconnect(); },
+        };
+    }
+    return { erzeuge };
+})();
+
+        const jarvisRing = JarvisRing.erzeuge(document.getElementById('ring-canvas'), { variante: 'B', mitte: 'leer' });
+
+        let isShuttingDown = false;
+        let graphVersion = -1;
+        let aktiverTab = 'graph';
+        const $ = (id) => document.getElementById(id);
+
+        /* ======================= Uhr & Datum ======================= */
+        const TAGE = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
+        const MONATE = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+        const p2 = (n) => String(n).padStart(2, '0');
+        function kalenderwoche(d) {
+            const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+            const tag = t.getUTCDay() || 7;
+            t.setUTCDate(t.getUTCDate() + 4 - tag);
+            const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+            return Math.ceil((((t - y0) / 86400000) + 1) / 7);
+        }
+        function tickClock() {
+            const d = new Date();
+            $('clock').firstChild.nodeValue = p2(d.getHours()) + ':' + p2(d.getMinutes());
+            $('clock-sec').textContent = ':' + p2(d.getSeconds());
+            $('date-tag').textContent = TAGE[d.getDay()];
+            $('date-sub').textContent = d.getDate() + '. ' + MONATE[d.getMonth()] + ' ' + d.getFullYear() + ' · KW ' + kalenderwoche(d);
+            renderZeit();
+        }
+
+        /* ======================= Wetter ======================= */
+        function ladeWetter() {
+            fetch('/api/wetter').then(r => r.json()).then(w => {
+                const box = $('wetter');
+                box.textContent = '';
+                if (!w.ok) {
+                    const s = document.createElement('span'); s.className = 'desc';
+                    s.textContent = 'Wetter nicht verfügbar (' + (w.fehler || 'Internet?') + ')';
+                    box.appendChild(s);
+                    setTimeout(ladeWetter, 20000);
+                    return;
+                }
+                const mk = (cls, txt) => { const e = document.createElement('span'); e.className = cls; e.textContent = txt; return e; };
+                box.appendChild(mk('sym', w.symbol));
+                box.appendChild(mk('temp', w.temp + '°'));
+                const d = document.createElement('div'); d.className = 'desc';
+                d.appendChild(document.createTextNode(w.ort + ' · ' + w.text));
+                d.appendChild(document.createElement('br'));
+                d.appendChild(document.createTextNode('Heute ' + w.min + '° / ' + w.max + '°  ·  Regen ' + (w.regen ?? '–') + ' %  ·  Wind ' + w.wind + ' km/h'));
+                box.appendChild(d);
+                const tg = document.createElement('div'); tg.className = 'tage';
+                (w.tage || []).slice(1).forEach(t => {
+                    const dt = new Date(t.datum + 'T12:00:00');
+                    const c = document.createElement('div'); c.className = 'tag-chip';
+                    const b = document.createElement('b'); b.textContent = TAGE[dt.getDay()].slice(0, 2) + ' ' + dt.getDate() + '.';
+                    c.appendChild(b);
+                    c.appendChild(document.createTextNode(t.symbol + ' ' + t.min + '/' + t.max + '°'));
+                    tg.appendChild(c);
+                });
+                box.appendChild(tg);
+                setTimeout(ladeWetter, 10 * 60 * 1000);
+            }).catch(() => setTimeout(ladeWetter, 60000));
+        }
+
+        /* ======================= Timer / Wecker / Erinnerungen ======================= */
+        let zeitItems = [];
+        let zeitOffset = 0;      // Serverzeit - Browserzeit in ms
+        function ladeZeit() {
+            if (isShuttingDown) return;
+            fetch('/api/zeit').then(r => r.json()).then(z => {
+                zeitItems = z.items || [];
+                zeitOffset = z.jetzt * 1000 - Date.now();
+                renderZeit();
+            }).catch(() => {});
+        }
+        function fmtRest(s) {
+            s = Math.max(0, Math.round(s));
+            const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
+            if (h >= 24) return Math.floor(h / 24) + 'd ' + (h % 24) + 'h';
+            return h > 0 ? h + ':' + p2(m) + ':' + p2(x) : p2(m) + ':' + p2(x);
+        }
+        const ICO = { timer: '⏳', wecker: '⏰', erinnerung: '🔔' };
+        function renderZeit() {
+            const strip = $('zeit-strip');
+            const jetzt = Date.now() + zeitOffset;
+            const klingelt = zeitItems.some(i => i.status === 'klingelt');
+            $('zeit-ok').classList.toggle('zeigen', klingelt);
+            jarvisRing.setAlarm(klingelt);
+            strip.classList.toggle('zeigen', zeitItems.length > 0);
+            if (!zeitItems.length) { strip.textContent = ''; return; }
+            // nur neu aufbauen, wenn sich die Liste geändert hat; sonst Zähler aktualisieren
+            const sig = zeitItems.map(i => i.id + i.status).join('|');
+            if (strip.dataset.sig !== sig) {
+                strip.dataset.sig = sig;
+                strip.textContent = '';
+                zeitItems.forEach(it => {
+                    const row = document.createElement('div');
+                    row.className = 'z-item' + (it.status === 'klingelt' ? ' klingelt' : '');
+                    row.dataset.id = it.id;
+                    const ico = document.createElement('span'); ico.className = 'ico'; ico.textContent = ICO[it.art] || '•';
+                    const lbl = document.createElement('span'); lbl.className = 'lbl';
+                    lbl.textContent = (it.label || { timer: 'Timer', wecker: 'Wecker', erinnerung: 'Erinnerung' }[it.art]) +
+                        (it.art === 'timer' ? '' : '  (' + it.tag + ' ' + it.uhrzeit + ')');
+                    const rest = document.createElement('span'); rest.className = 'rest';
+                    const x = document.createElement('button'); x.className = 'x'; x.textContent = '×'; x.title = 'Löschen';
+                    x.onclick = () => zeitCancel(it.id);
+                    row.append(ico, lbl, rest, x);
+                    strip.appendChild(row);
+                });
+            }
+            zeitItems.forEach(it => {
+                const row = strip.querySelector('[data-id="' + it.id + '"]');
+                if (!row) return;
+                const rest = row.querySelector('.rest');
+                const s = it.ziel_ts - jetzt / 1000;
+                rest.textContent = it.status === 'klingelt' ? 'JETZT!' : fmtRest(s);
+            });
+        }
+        function zeitCancel(id) {
+            fetch('/api/zeit/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) })
+                .then(ladeZeit);
+        }
+        function zeitAck() {
+            fetch('/api/zeit/ack', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+                .then(ladeZeit);
+        }
+
+        /* ======================= Ausklappbarer Baum ======================= */
+        const offeneOrdner = new Set();
+        let letzterBaum = null;
+        function setzeBaum(html) {
+            if (html === letzterBaum) return;          // unverändert -> nichts anfassen (Aufklapp-Zustand bleibt)
+            letzterBaum = html;
+            const box = $('tree-display'), oben = box.scrollTop;
+            box.innerHTML = html;
+            box.querySelectorAll('details[data-p]').forEach(d => { if (offeneOrdner.has(d.dataset.p)) d.open = true; });
+            box.scrollTop = oben;
+        }
+        function treeAll(auf) {
+            $('tree-display').querySelectorAll('details[data-p]').forEach(d => {
+                d.open = auf;
+                if (auf) offeneOrdner.add(d.dataset.p); else offeneOrdner.delete(d.dataset.p);
+            });
+        }
+        $('tree-display').addEventListener('toggle', e => {
+            const d = e.target;
+            if (d.dataset && d.dataset.p !== undefined) { if (d.open) offeneOrdner.add(d.dataset.p); else offeneOrdner.delete(d.dataset.p); }
+        }, true);
+        $('tree-display').addEventListener('click', e => {
+            const f = e.target.closest('.tree-file');
+            if (f) fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: f.dataset.id }) });
+        });
+
+        /* ======================= Tabs ======================= */
+        function showTab(t) {
+            aktiverTab = t;
+            $('tab-baum').classList.toggle('active', t === 'baum');
+            $('tab-graph').classList.toggle('active', t === 'graph');
+            $('tab-links').classList.toggle('active', t === 'links');
+            $('vk-panel').style.display = t === 'links' ? 'block' : 'none';
+            if (t === 'links') ladeVorschlaege();
+            $('tree-open').style.display = $('tree-close').style.display = t === 'baum' ? '' : 'none';
+            $('tree-display').style.display = t === 'baum' ? 'block' : 'none';
+            $('graph-wrap').style.display = t === 'graph' ? 'block' : 'none';
+            if (t === 'graph') { graphResize(); ladeGraph(true); graphStart(); }
+        }
+
+
+        /* ======================= Link-Vorschläge (Wissens-Verknüpfung) ======================= */
+        async function ladeVorschlaege() {
+            const hint = $('vk-hinweis'), box = $('vk-liste');
+            hint.textContent = 'Suche ähnliche Notizen ohne Link ...';
+            try {
+                const d = await (await fetch('/api/verknuepfungen')).json();
+                box.textContent = '';
+                if (!d.bereit) { hint.textContent = 'Der Notizindex ist noch nicht bereit - gleich nochmal versuchen.'; return; }
+                if (!d.liste.length) { hint.textContent = 'Keine fehlenden Verknüpfungen gefunden.'; return; }
+                hint.textContent = 'Diese Notizen passen inhaltlich zusammen, haben aber noch keinen Link. Ja trägt ihn unter "Siehe auch" ein.';
+                d.liste.forEach(v => {
+                    const el = document.createElement('div'); el.className = 'vk-item';
+                    const t = document.createElement('div'); t.className = 'vk-titel';
+                    const b1 = document.createElement('b'); b1.textContent = v.titel_a;
+                    const b2 = document.createElement('b'); b2.textContent = v.titel_b;
+                    t.append(b1, ' \u2194 ', b2);
+                    const w = document.createElement('div'); w.className = 'vk-wert'; w.textContent = 'Ähnlichkeit ' + Math.round(v.wert * 100) + ' %';
+                    const ja = document.createElement('button'); ja.textContent = 'LINK EINTRAGEN';
+                    const nein = document.createElement('button'); nein.className = 'nein'; nein.textContent = 'ABLEHNEN';
+                    const antwort = async (wert) => {
+                        ja.disabled = nein.disabled = true;
+                        try {
+                            const r = await (await fetch('/api/verknuepfen', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ a: v.a, b: v.b, ja: wert }) })).json();
+                            w.textContent = r.text || (r.ok ? 'Erledigt.' : 'Hat nicht geklappt.');
+                            setTimeout(() => el.remove(), 2500);
+                        } catch (e) { w.textContent = 'Keine Verbindung.'; ja.disabled = nein.disabled = false; }
+                    };
+                    ja.onclick = () => antwort(true); nein.onclick = () => antwort(false);
+                    el.append(t, w, ja, nein); box.appendChild(el);
+                });
+            } catch (e) { hint.textContent = 'Vorschläge nicht erreichbar.'; }
+        }
+
+        /* ======================= Graph (3D-Kräfte-Simulation, dreht sich) ======================= */
+        const cv = $('graph-canvas');
+        const ctx = cv.getContext('2d');
+        let G = { nodes: [], links: [], byId: new Map(), stats: {}, R: 150 };
+        let view = { k: 1 };                                   // Zoom
+        let cam = { yaw: 0.6, pitch: 0.35, auto: true, pause: 0, last: 0 };
+        let fitGemacht = false, alpha = 1, rafId = null, hover = null, drag = null, moved = false;
+        const GRUPPEN = new Map();
+        function farbe(grp) {
+            if (!GRUPPEN.has(grp)) GRUPPEN.set(grp, (GRUPPEN.size * 47 + 160) % 360);
+            return GRUPPEN.get(grp);
+        }
+        function graphResize() {
+            const r = { width: cv.clientWidth, height: cv.clientHeight };            // tatsächliche Anzeigegröße des Canvas (ohne Rahmen des Umschlags)
+            const dpr = window.devicePixelRatio || 1;
+            if (r.width < 2) return;
+            cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+        function ladeGraph(force) {
+            fetch('/api/graph?v=' + (force ? graphVersion : -2)).then(r => r.json()).then(g => {
+                if (g.unveraendert) return;
+                graphVersion = g.version;
+                baueGraph(g);
+            }).catch(() => {});
+        }
+        function zufallKugel(r) {
+            const u = Math.random() * 2 - 1, t = Math.random() * 6.2832, s = Math.sqrt(1 - u * u), q = r * Math.cbrt(Math.random());
+            return [q * s * Math.cos(t), q * u, q * s * Math.sin(t)];
+        }
+        function baueGraph(g) {
+            const alt = G.byId;
+            const nodes = (g.nodes || []).map(n => {
+                const o = alt.get(n.id), p = zufallKugel(160);
+                return Object.assign({}, n, {
+                    x: o ? o.x : p[0], y: o ? o.y : p[1], z: o ? o.z : p[2],
+                    vx: 0, vy: 0, vz: 0,
+                    r: n.type === 'root' ? 9 : n.type === 'folder' ? 6 : 3 + Math.min(7, Math.sqrt(n.deg || 0) * 2.2),
+                    nb: new Set(), sx: 0, sy: 0, sr: 0, tz: 0
+                });
+            });
+            const byId = new Map(nodes.map(n => [n.id, n]));
+            const links = [];
+            (g.links || []).forEach(l => {
+                const a = byId.get(l.s), b = byId.get(l.t);
+                if (!a || !b) return;
+                links.push({ a, b, k: l.k });
+                a.nb.add(b); b.nb.add(a);
+            });
+            G = { nodes, links, byId, stats: g.stats || {}, R: G.R || 150 };
+            if (alt.size === 0) view = { k: 1 };
+            const st = G.stats;
+            $('graph-legend').textContent = (st.notizen ?? 0) + ' Dateien · ' + (st.verknuepfungen ?? 0) + ' Verknüpfungen' +
+                (st.ausgeblendet ? ' · ' + st.ausgeblendet + ' ausgeblendet' : '');
+            alpha = 1; fitGemacht = false;
+            graphStart();
+        }
+        function simStep() {
+            const N = G.nodes, CELL = 140, grid = new Map();
+            N.forEach(n => {
+                const key = Math.floor(n.x / CELL) + ',' + Math.floor(n.y / CELL) + ',' + Math.floor(n.z / CELL);
+                (grid.get(key) || grid.set(key, []).get(key)).push(n);
+            });
+            N.forEach(n => {                                   // Abstoßung (nur Nachbarzellen)
+                const gx = Math.floor(n.x / CELL), gy = Math.floor(n.y / CELL), gz = Math.floor(n.z / CELL);
+                for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) {
+                    const cell = grid.get((gx + i) + ',' + (gy + j) + ',' + (gz + k));
+                    if (!cell) continue;
+                    for (const m of cell) {
+                        if (m === n) continue;
+                        let dx = n.x - m.x, dy = n.y - m.y, dz = n.z - m.z, d2 = dx * dx + dy * dy + dz * dz;
+                        if (d2 > CELL * CELL) continue;
+                        if (d2 < 1) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; dz = Math.random() - 0.5; d2 = 1; }
+                        const f = 800 * alpha / d2;
+                        n.vx += dx * f; n.vy += dy * f; n.vz += dz * f;
+                    }
+                }
+            });
+            G.links.forEach(l => {                             // Federn
+                const dx = l.b.x - l.a.x, dy = l.b.y - l.a.y, dz = l.b.z - l.a.z, d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+                const ziel = l.k === 'l' ? 70 : 48, st = (l.k === 'l' ? 0.10 : 0.06) * alpha;
+                const f = (d - ziel) / d * st;
+                l.a.vx += dx * f; l.a.vy += dy * f; l.a.vz += dz * f; l.b.vx -= dx * f; l.b.vy -= dy * f; l.b.vz -= dz * f;
+            });
+            N.forEach(n => {                                   // Schwerkraft zur Mitte (0,0,0) + Bewegung
+                n.vx -= n.x * 0.010 * alpha; n.vy -= n.y * 0.010 * alpha; n.vz -= n.z * 0.010 * alpha;
+                n.vx *= 0.82; n.vy *= 0.82; n.vz *= 0.82;
+                n.x += Math.max(-12, Math.min(12, n.vx)); n.y += Math.max(-12, Math.min(12, n.vy)); n.z += Math.max(-12, Math.min(12, n.vz));
+            });
+            alpha = Math.max(0, alpha - 0.004);
+            if (!fitGemacht && alpha < 0.03) { fitGemacht = true; graphFit(); }
+        }
+        function graphFit() {
+            if (!G.nodes.length) return;
+            let R = 40;
+            G.nodes.forEach(n => { R = Math.max(R, Math.sqrt(n.x * n.x + n.y * n.y + n.z * n.z)); });
+            G.R = R;
+            view.k = Math.max(0.3, Math.min(3, Math.min(cv.clientWidth, cv.clientHeight) * 0.40 / R));
+        }
+        // 3D -> Bildschirm: erst um die Hochachse (yaw), dann kippen (pitch), dann Perspektive
+        function projiziere() {
+            const w = cv.clientWidth, h = cv.clientHeight, D = G.R * 3.2;
+            const cy_ = Math.cos(cam.yaw), sy_ = Math.sin(cam.yaw), cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+            G.nodes.forEach(n => {
+                const x1 = n.x * cy_ + n.z * sy_, z1 = -n.x * sy_ + n.z * cy_;
+                const y2 = n.y * cp - z1 * sp, z2 = n.y * sp + z1 * cp;
+                const s = view.k * D / (D + z2);
+                n.sx = w / 2 + x1 * s; n.sy = h / 2 + y2 * s; n.sr = n.r * Math.sqrt(view.k) * D / (D + z2); n.tz = z2;
+            });
+        }
+        function tiefe(z) { return Math.max(0, Math.min(1, 1 - (z + G.R) / (2 * G.R))); }   // 1 = vorne, 0 = hinten
+        // Zentraler Archiv-Knoten: pulsierender Kern, auslaufende Radar-Welle und zwei kreisende Bahnen mit Satelliten
+        function zeichneWurzel(x, y, r0, a) {
+            const T = performance.now() / 1000, R = r0 * 1.9, TAU = 6.2832;
+            ctx.save(); ctx.globalAlpha = a; ctx.lineWidth = 1.3;
+            const ph = (T * 0.45) % 1;                                              // Welle
+            ctx.beginPath(); ctx.arc(x, y, R * (1.2 + 2.6 * ph), 0, TAU);
+            ctx.strokeStyle = 'rgba(0,243,255,' + (0.55 * (1 - ph)).toFixed(2) + ')'; ctx.stroke();
+            [[R * 2.5, R * 0.95, T * 0.8, 2.3], [R * 2.0, R * 0.7, -T * 0.55 + 1.2, -3.1]].forEach(([ra, rb, rot, sp], i) => {
+                ctx.beginPath(); ctx.ellipse(x, y, ra, rb, rot, 0, TAU);
+                ctx.strokeStyle = i ? 'rgba(255,255,255,0.35)' : 'rgba(0,243,255,0.5)'; ctx.stroke();
+                const ang = T * sp, px = x + Math.cos(rot) * ra * Math.cos(ang) - Math.sin(rot) * rb * Math.sin(ang),
+                      py = y + Math.sin(rot) * ra * Math.cos(ang) + Math.cos(rot) * rb * Math.sin(ang);
+                ctx.beginPath(); ctx.arc(px, py, Math.max(1.6, r0 * 0.28), 0, TAU);
+                ctx.fillStyle = i ? '#ffffff' : '#00f3ff'; ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 8; ctx.fill(); ctx.shadowBlur = 0;
+            });
+            const puls = 1 + 0.16 * Math.sin(T * 2.4);                              // Kern
+            const g = ctx.createRadialGradient(x, y, 0, x, y, R * puls);
+            g.addColorStop(0, '#ffffff'); g.addColorStop(0.55, 'rgba(160,250,255,0.95)'); g.addColorStop(1, 'rgba(0,243,255,0.15)');
+            ctx.beginPath(); ctx.arc(x, y, R * puls, 0, TAU); ctx.fillStyle = g;
+            ctx.shadowColor = '#00f3ff'; ctx.shadowBlur = 16 + 10 * Math.sin(T * 2.4); ctx.fill();
+            ctx.restore();
+        }
+        function draw() {
+            // Puffergröße immer an die tatsächlich angezeigte Größe anpassen (das Layout verschiebt sich z.B. wenn die Termine-Zeile erscheint),
+            // sonst bleibt am Rand ein ungelöschter Streifen und beim Zoomen "schmiert" das Bild
+            const dpr = window.devicePixelRatio || 1;
+            if (cv.width !== Math.round(cv.clientWidth * dpr) || cv.height !== Math.round(cv.clientHeight * dpr)) graphResize();
+            const w = cv.clientWidth, h = cv.clientHeight;
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.clearRect(0, 0, cv.width, cv.height);                                 // ganzen Puffer löschen
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            projiziere();
+            const fokus = hover || null;
+            G.links.forEach(l => {
+                const aktiv = fokus && (l.a === fokus || l.b === fokus);
+                const t = tiefe((l.a.tz + l.b.tz) / 2), a = 0.15 + 0.85 * t;
+                ctx.beginPath(); ctx.moveTo(l.a.sx, l.a.sy); ctx.lineTo(l.b.sx, l.b.sy);
+                ctx.strokeStyle = aktiv ? 'rgba(255,255,255,0.95)' : l.k === 'l' ? `rgba(0,243,255,${(0.75 * a).toFixed(2)})` : `rgba(0,102,255,${(0.32 * a).toFixed(2)})`;
+                ctx.lineWidth = (l.k === 'l' ? 1.4 : 0.8) * (0.6 + 0.6 * t);
+                ctx.stroke();
+            });
+            const T = performance.now() / 1000;
+            const reihe = G.nodes.slice().sort((p, q) => q.tz - p.tz);            // hinten zuerst
+            reihe.forEach(n => {
+                const x = n.sx, y = n.sy;
+                if (x < -20 || y < -20 || x > w + 20 || y > h + 20) return;
+                const t = tiefe(n.tz), dim = fokus && n !== fokus && !fokus.nb.has(n);
+                const istIndex = n.type !== 'folder' && n.type !== 'root' && /\bindex\b/i.test(n.name || '');
+                const c = n.type === 'root' ? '#ffffff' : n.type === 'folder' ? '#ffbc00' : istIndex ? '#ff2bd6' :
+                    n.type === 'pdf' ? '#ff5577' : (n.deg || 0) > 0 ? '#00f3ff' : 'hsl(' + farbe(n.grp) + ',100%,60%)';   // Notizen mit [[Links]] = Farbe der Verknüpfungslinien, Index = Magenta
+                ctx.globalAlpha = dim ? 0.15 : 0.35 + 0.65 * t;
+                const rad = Math.max(1.2, n.sr) * (istIndex ? 1.35 : 1);
+                if (n.type === 'root') zeichneWurzel(x, y, Math.max(6, n.sr), dim ? 0.3 : 1);
+                else {
+                    if (istIndex && !dim) {                                           // sanft pulsierender Ring um Index-Notizen
+                        const p = 0.5 + 0.5 * Math.sin(T * 3 + n.x * 0.05);
+                        ctx.beginPath(); ctx.arc(x, y, rad * (1.6 + 0.5 * p), 0, 6.2832);
+                        ctx.strokeStyle = 'rgba(255,43,214,' + (0.15 + 0.35 * (1 - p)).toFixed(2) + ')'; ctx.lineWidth = 1.2; ctx.stroke();
+                    }
+                    ctx.beginPath(); ctx.arc(x, y, rad, 0, 6.2832);
+                    ctx.fillStyle = c; ctx.shadowColor = c; ctx.shadowBlur = n === fokus ? 18 : (istIndex ? 10 : 3) + 6 * t;
+                    ctx.fill(); ctx.shadowBlur = 0;
+                }
+                const zeigeName = n === fokus || n.type === 'root' || (fokus && fokus.nb.has(n)) || ((n.type !== 'note' || (n.deg || 0) >= 4 || view.k > 1.5) && t > 0.45);
+                if (zeigeName && !dim) {
+                    ctx.font = (n === fokus ? 'bold 13px' : '11px') + ' monospace';
+                    ctx.fillStyle = n === fokus ? '#fff' : 'rgba(210,255,255,0.85)';
+                    ctx.fillText(n.name, x + n.sr + 4, y + 4);
+                }
+                ctx.globalAlpha = 1;
+            });
+        }
+        function loop(ts) {
+            rafId = null;
+            if (aktiverTab !== 'graph' || isShuttingDown) return;
+            const dt = cam.last ? Math.min(0.1, (ts - cam.last) / 1000) : 0.016; cam.last = ts;
+            if (alpha > 0.002) simStep();
+            if (cam.auto && !drag && ts > cam.pause) cam.yaw += dt * 0.28;           // dreht sich langsam um die Hochachse
+            draw();
+            rafId = requestAnimationFrame(loop);                                      // läuft immer weiter: der Archiv-Knoten ist animiert
+        }
+        function graphStart() { if (!rafId && aktiverTab === 'graph') rafId = requestAnimationFrame(loop); }
+        function pickNode(mx, my) {
+            let best = null, bd = 1e9;
+            G.nodes.forEach(n => {
+                const d = (n.sx - mx) ** 2 + (n.sy - my) ** 2, r = Math.max(4, n.sr) + 5;
+                if (d < r * r && (best === null || n.tz < best.tz)) { best = n; bd = d; }     // vorderster Treffer
+            });
+            return best;
+        }
+        function pos(e) { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+        cv.addEventListener('mousedown', e => {
+            const [mx, my] = pos(e); moved = false;
+            drag = { x: mx, y: my, yaw: cam.yaw, pitch: cam.pitch, n: pickNode(mx, my) };
+            cv.style.cursor = 'grabbing'; graphStart();
+        });
+        window.addEventListener('mousemove', e => {
+            if (aktiverTab !== 'graph') return;
+            const [mx, my] = pos(e);
+            if (drag) {
+                if (Math.abs(mx - drag.x) + Math.abs(my - drag.y) > 3) moved = true;
+                cam.yaw = drag.yaw + (mx - drag.x) * 0.008;
+                cam.pitch = Math.max(-1.4, Math.min(1.4, drag.pitch + (my - drag.y) * 0.008));
+            } else {
+                const n = pickNode(mx, my);
+                if (n !== hover) { hover = n; cv.style.cursor = n ? 'pointer' : 'grab'; }
+            }
+            graphStart();
+        });
+        window.addEventListener('mouseup', () => {
+            if (drag) {
+                if (!moved && drag.n && drag.n.type !== 'folder' && drag.n.type !== 'root') {
+                    fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: drag.n.id }) });
+                }
+                cam.pause = performance.now() + 2500;                                   // nach dem Drehen kurz Ruhe
+            }
+            drag = null; cv.style.cursor = 'grab'; graphStart();
+        });
+        cv.addEventListener('dblclick', () => { cam.auto = !cam.auto; $('graph-info').textContent = graphHinweis(); graphStart(); });
+        cv.addEventListener('wheel', e => {
+            e.preventDefault();
+            view.k = Math.max(0.2, Math.min(6, view.k * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+            graphStart();
+        }, { passive: false });
+        function graphHinweis() { return 'Ziehen: drehen · Mausrad: Zoom · Klick: Notiz öffnen · Doppelklick: Drehung ' + (cam.auto ? 'anhalten' : 'starten'); }
+        $('graph-info').textContent = graphHinweis();
+        window.addEventListener('resize', () => { if (aktiverTab === 'graph') { graphResize(); graphStart(); } });
+        if (window.ResizeObserver) new ResizeObserver(() => { if (aktiverTab === 'graph') { graphResize(); graphStart(); } }).observe($('graph-wrap'));
+
+        /* ======================= Daten / Befehle ======================= */
+        function updateData() {
+            if (isShuttingDown) return;
+
+            fetch('/api/data')
+                .then(res => res.json())
+                .then(data => {
+                    setzeBaum(data.tree || "Keine Daten.");
+                    $('status-display').innerText = (data.status === 'ERKENNUNG') ? 'ERKENNE SPRACHE' : (data.status || "ONLINE");
+                    $('stt-badge').textContent = '🎙 ' + (data.stt || '-');
+                    setMicButton(!!data.mic_muted);
+                    {
+                        const el = $('termine-strip'), t = data.termine || [];
+                        el.style.display = t.length ? 'flex' : 'none';
+                        el.innerHTML = t.map(x => '<span class="trm' + (x.tage <= 1 ? ' nah' : '') + '">' +
+                            (x.art === 'jubilaeum' ? '💍 ' : x.gedenken ? '🕯 ' : '🎂 ') + x.wer + (x.jahre ? ' (' + x.jahre + ')' : '') +
+                            ' · ' + (x.tage === 0 ? 'heute' : x.tage === 1 ? 'morgen' : 'in ' + x.tage + ' Tg.') + '</span>').join('');
+                    }
+                    {
+                        const el = $('termine-strip'), kk = data.kalender || [];
+                        if (kk.length) {
+                            el.style.display = 'flex';
+                            el.innerHTML += kk.map(x => '<span class="trm' + (x.tage === 0 ? ' nah' : '') + '">📅 ' + x.titel + ' · ' + (x.tage === 0 ? '' : x.tage === 1 ? 'morgen ' : 'in ' + x.tage + ' Tg. ') + x.zeit + '</span>').join('');
+                        }
+                    }
+                    {
+                        const el = $('termine-strip'), mm = data.muell || [];
+                        const FARBE = { grau: '#9aa5b1', blau: '#4d9fff', braun: '#b9824a', gelb: '#ffd400', gruen: '#3ddc84', 'grün': '#3ddc84' };
+                        if (mm.length) {
+                            el.style.display = 'flex';
+                            el.innerHTML += mm.map(x => '<span class="trm' + (x.tage <= 1 ? ' nah' : '') + '">🗑 ' +
+                                (x.farben || []).map(f => '<span style="color:' + (FARBE[f] || '#00f3ff') + '">●</span>').join('') + ' ' +
+                                x.namen.join(', ').replace(/[<>&]/g, '') + ' · ' + (x.tage === 0 ? 'heute' : x.tage === 1 ? 'morgen' : 'in ' + x.tage + ' Tg.') + '</span>').join('');
+                        }
+                    }
+                    if (data.haus && $('haus-w')) {
+                        const w = data.haus.haus_w != null ? data.haus.haus_w : data.haus.steckdosen_w;
+                        $('haus-w').textContent = (w == null ? '–' : (w >= 1000 ? (w / 1000).toFixed(2).replace('.', ',') + ' kW' : Math.round(w) + ' W')) +
+                            (data.haus.fenster_offen ? '  ⚠ ' + data.haus.fenster_offen + ' Fenster offen' : '');
+                    }
+                    if (typeof data.graph_version === 'number' && data.graph_version !== graphVersion && aktiverTab === 'graph') ladeGraph(true);
+                    if (typeof data.graph_version === 'number' && aktiverTab === 'baum') window._gv = data.graph_version;
+
+                    // Ring: Farbe und Bewegung folgen dem Zustand (ONLINE, PROCESSING, AUDIO-AUSGABE, SEARCHING ...)
+                    jarvisRing.setZustand(data.status || 'ONLINE');
+                    jarvisRing.setStumm(!!data.mic_muted);
+
+                    if (data.status === "OFFLINE") {
+                        isShuttingDown = true;
+                        setTimeout(() => { window.close(); }, 800);
+                    }
+                })
+                .catch(err => console.error("API-Fehler:", err));
+
+            fetch('/api/logs')
+                .then(res => res.json())
+                .then(data => {
+                    if (data && data.logs) {
+                        const box = $('cmd-terminal-box');
+                        box.textContent = data.logs.join('\n');
+                        box.scrollTop = box.scrollHeight;
+                    }
+                })
+                .catch(err => console.error("Log-API Fehler:", err));
+            ladeZeit();
+        }
+
+        function setMicButton(muted) {
+            const btn = $('mic-btn');
+            btn.classList.toggle('muted', muted);
+            btn.textContent = muted ? "🔇 MIKRO STUMM" : "🎤 MIKRO AN";
+        }
+
+        function toggleMic() {
+            fetch("/api/mic", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({})
+            })
+            .then(res => res.json())
+            .then(data => { setMicButton(!!data.muted); updateData(); })
+            .catch(err => console.error("Mikro-API Fehler:", err));
+        }
+
+        /* ======================= Befehlsverlauf (Pfeil hoch/runter) ======================= */
+        let verlaufBefehle = [], verlaufIdx = 0, verlaufEntwurf = '';
+        try { verlaufBefehle = JSON.parse(localStorage.getItem('jarvis_befehle') || '[]').filter(x => typeof x === 'string').slice(-50); } catch (e) {}
+        verlaufIdx = verlaufBefehle.length;
+        function verlaufMerken(cmd) {
+            if (verlaufBefehle[verlaufBefehle.length - 1] !== cmd) verlaufBefehle.push(cmd);
+            verlaufBefehle = verlaufBefehle.slice(-50);
+            verlaufIdx = verlaufBefehle.length; verlaufEntwurf = '';
+            try { localStorage.setItem('jarvis_befehle', JSON.stringify(verlaufBefehle)); } catch (e) {}
+        }
+        function verlaufTaste(e) {
+            const input = e.target;
+            if (e.key === 'ArrowUp') {
+                if (!verlaufBefehle.length) return;
+                e.preventDefault();
+                if (verlaufIdx === verlaufBefehle.length) verlaufEntwurf = input.value;
+                verlaufIdx = Math.max(0, verlaufIdx - 1);
+                input.value = verlaufBefehle[verlaufIdx];
+            } else if (e.key === 'ArrowDown') {
+                if (verlaufIdx >= verlaufBefehle.length) return;
+                e.preventDefault();
+                verlaufIdx++;
+                input.value = verlaufIdx === verlaufBefehle.length ? verlaufEntwurf : verlaufBefehle[verlaufIdx];
+            } else return;
+            const n = input.value.length; input.setSelectionRange(n, n);
+        }
+
+        function sendCommand() {
+            const input = $("cmd-input");
+            const cmd = input.value.trim();
+            if (!cmd) return;
+            verlaufMerken(cmd);
+            fetch("/api/command", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ command: cmd })
+            }).then(() => {
+                input.value = "";
+                updateData();
+            });
+        }
+
+        function triggerShutdown() {
+            if (!confirm("JARVIS beenden?")) return;
+            isShuttingDown = true;
+            $('status-display').innerText = "FÄHRT HERUNTER ...";
+            document.querySelectorAll('button').forEach(b => b.disabled = true);
+            // keepalive: die Anfrage geht auch dann noch raus, wenn der Tab sofort geschlossen wird
+            fetch("/api/shutdown", { method: "POST", keepalive: true }).catch(() => {});
+            // warten, bis der Server wirklich weg ist, erst dann Fenster schließen
+            let versuche = 0;
+            const pruefe = setInterval(() => {
+                versuche++;
+                fetch("/api/data", { cache: "no-store" }).then(() => {
+                    if (versuche > 24) { clearInterval(pruefe); $('status-display').innerText = "KERN ANTWORTET NOCH - Fenster 'JARVIS Kern' prüfen"; }
+                }).catch(() => {
+                    clearInterval(pruefe);
+                    $('status-display').innerText = "OFFLINE - du kannst das Fenster schließen";
+                    setTimeout(() => { window.close(); }, 600);
+                });
+            }, 500);
+        }
+
+        window.onload = function() {
+            $('cmd-input').addEventListener('keydown', e => { if (e.key === 'Enter') sendCommand(); else verlaufTaste(e); });
+            tickClock(); setInterval(tickClock, 1000);
+            updateData(); setInterval(updateData, 2000);
+            ladeWetter();
+            showTab('graph');                                   // Start mit dem Graph, der Baum ist der zweite Reiter
+        };
+    </script>
+</body>
+</html>

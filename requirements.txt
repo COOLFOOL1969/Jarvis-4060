@@ -1,0 +1,11 @@
+# Pakete, die Jarvis braucht. Installieren mit Doppelklick auf Pakete_installieren.bat
+SpeechRecognition
+PyAudio
+faster-whisper
+numpy
+edge-tts
+playsound==1.2.2
+voicemeeter-api
+ollama
+ddgs
+python-dateutil
